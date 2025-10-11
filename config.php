@@ -7,14 +7,15 @@ if (session_status() === PHP_SESSION_NONE) {
     session_start();
 }
 
-// --- Database Credentials ---
-if (!defined('DB_HOST')) define('DB_HOST', 'localhost');
-if (!defined('DB_USERNAME')) define('DB_USERNAME', 'root');
-if (!defined('DB_PASSWORD')) define('DB_PASSWORD', '@l03e1t3'); // For default XAMPP, the password is often empty.
-if (!defined('DB_NAME')) define('DB_NAME', 'versogym');
+// --- Database Credentials --- (Prioritize env vars for Vercel/Aiven)
+if (!defined('DB_HOST')) define('DB_HOST', $_ENV['DB_HOST'] ?? 'localhost');
+if (!defined('DB_PORT')) define('DB_PORT', $_ENV['DB_PORT'] ?? 3306);
+if (!defined('DB_USERNAME')) define('DB_USERNAME', $_ENV['DB_USER'] ?? 'root');
+if (!defined('DB_PASSWORD')) define('DB_PASSWORD', $_ENV['DB_PASS'] ?? '@l03e1t3'); // For default XAMPP, the password is often empty.
+if (!defined('DB_NAME')) define('DB_NAME', $_ENV['DB_NAME'] ?? 'versogym');
 
 // --- Site Configuration ---
-if (!defined('BASE_URL')) define('BASE_URL', 'http://localhost/WebProj');
+if (!defined('BASE_URL')) define('BASE_URL', $_ENV['BASE_URL'] ?? 'http://localhost/WebProj');
 
 // Uploads config (avatars)
 if (!defined('AVATARS_DIR')) define('AVATARS_DIR', __DIR__ . '/uploads/avatars'); // server filesystem path
@@ -26,6 +27,7 @@ ini_set('display_errors', '1');
 
 /**
  * Returns a mysqli connection. Uses exceptions for errors.
+ * Supports SSL for external hosts like Aiven.
  *
  * @return mysqli
  * @throws Exception
@@ -35,8 +37,18 @@ if (!function_exists('getDbConnection')) {
     {
         mysqli_report(MYSQLI_REPORT_ERROR | MYSQLI_REPORT_STRICT);
         try {
-            $conn = new mysqli(DB_HOST, DB_USERNAME, DB_PASSWORD, DB_NAME);
+            $conn = new mysqli(DB_HOST, DB_USERNAME, DB_PASSWORD, DB_NAME, DB_PORT);
             $conn->set_charset('utf8mb4');
+            
+            // Enable SSL for secure external connections (e.g., Aiven)
+            if (DB_HOST !== 'localhost') {
+                // Use system CA bundle for verification (Vercel has OpenSSL defaults)
+                $conn->ssl_set(null, null, null, null, null);
+                if (!$conn->real_connect(DB_HOST, DB_USERNAME, DB_PASSWORD, DB_NAME, DB_PORT, null, MYSQLI_CLIENT_SSL)) {
+                    throw new mysqli_sql_exception($conn->error);
+                }
+            }
+            
             return $conn;
         } catch (mysqli_sql_exception $e) {
             error_log('DB Connection Error: ' . $e->getMessage());
@@ -181,3 +193,4 @@ if (!function_exists('save_profile_image')) {
         return $webPath;
     }
 }
+?>

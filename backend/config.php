@@ -6,13 +6,14 @@ require_once __DIR__ . '/../config.php';
 
 // Google OAuth constants (optional). Define here only if not already defined in environment.
 if (!defined('GOOGLE_CLIENT_ID')) {
-    define('GOOGLE_CLIENT_ID', '1007094319099-0k29ipdh5q797sbl3aa4q7b2l3360on0.apps.googleusercontent.com');
+    define('GOOGLE_CLIENT_ID', $_ENV['GOOGLE_CLIENT_ID'] ?? '1007094319099-0k29ipdh5q797sbl3aa4q7b2l3360on0.apps.googleusercontent.com');
 }
 if (!defined('GOOGLE_CLIENT_SECRET')) {
-    define('GOOGLE_CLIENT_SECRET', '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');
+    define('GOOGLE_CLIENT_SECRET', $_ENV['GOOGLE_CLIENT_SECRET'] ?? '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');
 }
 if (!defined('GOOGLE_REDIRECT_URI')) {
     // Use BASE_URL from main config if available, else fallback to localhost
-    $base = defined('BASE_URL') ? rtrim(BASE_URL, '/') : 'http://localhost/WebProj';
+    $base = defined('BASE_URL') ? rtrim(BASE_URL, '/') : ($_ENV['BASE_URL'] ?? 'http://localhost/WebProj');
     define('GOOGLE_REDIRECT_URI', $base . '/google_callback.php');
 }
+?>
