@@ -1,14 +1,18 @@
 <?php
-// DB Connection
-function getDbConnection() {
-    $conn = new mysqli('localhost', 'root', '@l03e1t3', 'versogym');  // Update credentials
-    if ($conn->connect_error) die("Connection failed: " . $conn->connect_error);
-    return $conn;
-}
+// backend/config.php - Thin wrapper to load main project config and define optional constants
 
-// Google Constants (add your real values)
-define('GOOGLE_CLIENT_ID', '1007094319099-0k29ipdh5q797sbl3aa4q7b2l3360on0.apps.googleusercontent.com');
-define('GOOGLE_CLIENT_SECRET', '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');
-define('GOOGLE_REDIRECT_URI', 'http://localhost/WebProj/google_callback.php');
-// Other constants like FACEBOOK_APP_ID if needed...
-?>
+// Load the main project configuration which defines getDbConnection(), helpers, and constants
+require_once __DIR__ . '/../config.php';
+
+// Google OAuth constants (optional). Define here only if not already defined in environment.
+if (!defined('GOOGLE_CLIENT_ID')) {
+    define('GOOGLE_CLIENT_ID', '1007094319099-0k29ipdh5q797sbl3aa4q7b2l3360on0.apps.googleusercontent.com');
+}
+if (!defined('GOOGLE_CLIENT_SECRET')) {
+    define('GOOGLE_CLIENT_SECRET', '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');
+}
+if (!defined('GOOGLE_REDIRECT_URI')) {
+    // Use BASE_URL from main config if available, else fallback to localhost
+    $base = defined('BASE_URL') ? rtrim(BASE_URL, '/') : 'http://localhost/WebProj';
+    define('GOOGLE_REDIRECT_URI', $base . '/google_callback.php');
+}

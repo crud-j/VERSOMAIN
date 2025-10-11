@@ -1,53 +1,80 @@
 <?php
+// login.php
+
+session_start();
 require_once __DIR__ . '/backend/config.php';
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $email = trim($_POST['email']);
-    $password = $_POST['password'];
+    $email = trim($_POST['email'] ?? '');
+    $password = $_POST['password'] ?? '';
 
-    $conn = getDbConnection();
+    try {
+        $conn = getDbConnection();
 
-    $stmt = $conn->prepare("SELECT id, fullname, email, password FROM users WHERE email = ? AND oauth_provider = 'local' LIMIT 1");
-    $stmt->bind_param('s', $email);
-    $stmt->execute();
-    $stmt->store_result();
+        $stmt = $conn->prepare("SELECT id, fullname, email, password, role, picture FROM users WHERE email = ? LIMIT 1");
+        $stmt->bind_param('s', $email);
+        $stmt->execute();
+        $stmt->store_result();
 
-    if ($stmt->num_rows === 1) {
-        $stmt->bind_result($id, $fullname, $email_db, $hashed_password);
-        $stmt->fetch();
+        if ($stmt->num_rows === 1) {
+            $stmt->bind_result($id, $fullname, $email_db, $hashed_password, $role, $picture);
+            $stmt->fetch();
 
-        if (password_verify($password, $hashed_password)) {
-            $_SESSION['user'] = [
-                'id' => $id,
-                'fullname' => $fullname,
-                'email' => $email_db,
-                'oauth_provider' => 'local',
-            ];
-            $stmt->close();
-            $conn->close();
-            header('Location: customerdash.php');
-            exit();
+            if (!empty($hashed_password) && password_verify($password, $hashed_password)) {
+                // Regenerate session id to prevent fixation
+                session_regenerate_id(true);
+
+                // Set session keys used across the app
+                $_SESSION['user_id'] = (int)$id;
+                $_SESSION['user_email'] = $email_db;
+                $_SESSION['user_fullname'] = $fullname;
+                $_SESSION['role'] = $role;
+                $_SESSION['user_picture'] = $picture;
+
+                // Log the successful login
+                $ip = $_SERVER['REMOTE_ADDR'] ?? 'Unknown';
+                $user_agent = $_SERVER['HTTP_USER_AGENT'] ?? 'Unknown';
+                $insert_stmt = $conn->prepare("INSERT INTO login_history (user_id, ip_address, user_agent) VALUES (?, ?, ?)");
+                $insert_stmt->bind_param('iss', $id, $ip, $user_agent);
+                $insert_stmt->execute();
+                $insert_stmt->close();
+
+                $stmt->close();
+                $conn->close();
+
+                // Role-based redirection
+                if ($role === 'admin') {
+                    header('Location: admindash.php');
+                } else {
+                    header('Location: customerdash.php');
+                }
+                exit();
+            } else {
+                $stmt->close();
+                $conn->close();
+                header('Location: login.php?error=1');
+                exit();
+            }
         } else {
             $stmt->close();
             $conn->close();
-            die('Invalid email or password.');
+            header('Location: login.php?error=1');
+            exit();
         }
-    } else {
-        $stmt->close();
-        $conn->close();
-        die('Invalid email or password.');
+    } catch (Exception $e) {
+        error_log('Login error: ' . $e->getMessage());
+        header('Location: login.php?error=1');
+        exit();
     }
 } else {
-    // Show login form or handle GET request
+    // Show login form or handle GET request (existing HTML below)
 }
 ?>
 
-
 <!DOCTYPE html>
 <html lang="en">
-
 <head>
-  <meta charset="utf-8" />
+<meta charset="utf-8" />
   <meta content="width=device-width, initial-scale=1.0" name="viewport" />
   <title>Verso Gym - Login</title>
   <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
@@ -207,18 +234,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
   </style>
 </head>
-
 <body class="font-display bg-background-dark text-white">
-  <div class="relative min-h-screen flex items-center justify-center p-4">
+<div class="relative min-h-screen flex items-center justify-center p-4">
     <div class="gradient-blur gradient-blur-1"></div>
     <div class="gradient-blur gradient-blur-2"></div>
 
-    <!-- Back Button -->
-    <a class="absolute top-8 left-8 z-20 flex items-center gap-2 text-white hover:text-primary-light transition-colors duration-300"
-      href="index.php">
+    
+
+    <a class="absolute top-4 left-4 text-white bg-gray-800/50 hover:bg-gray-700/70 font-medium rounded-lg text-sm px-5 py-2.5 text-center inline-flex items-center backdrop-blur-sm border border-gray-600 z-20" href="index.php">
       <span class="material-icons">arrow_back</span>
-      <span>Back to Home</span>
-    </a>
+    Back
+  </a>
 
     <div class="relative w-full max-w-6xl mx-auto grid grid-cols-1 lg:grid-cols-2 gap-12 items-center">
 
@@ -257,7 +283,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             <p class="text-gray-400">Welcome back, champion!</p>
           </div>
 
-          <form action="customerdash.php" method="POST" class="space-y-6">
+          <form action="login.php" method="POST" class="space-y-6">
             <div>
               <label class="block text-sm font-medium text-gray-300 mb-2" for="email">Email Address</label>
               <div class="relative">
@@ -275,7 +301,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 <span class="material-icons absolute left-3 top-1/2 -translate-y-1/2 text-gray-400">lock</span>
                 <input
                   class="input-field block w-full rounded-lg py-3 pr-10 pl-10 text-white placeholder-gray-500 focus:outline-none"
-                  id="password" name="password" placeholder="••••••••" type="password" />
+                  id="password" name="password" placeholder="••••••••" type="password" required />
               </div>
               <div class="text-right mt-2">
                 <a class="text-sm text-blue-400 hover:text-blue-500 transition-colors" href="forgot-password.html">Forgot Password?</a>
@@ -318,5 +344,4 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     </div>
   </div>
 </body>
-
 </html>

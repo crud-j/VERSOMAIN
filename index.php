@@ -1,3 +1,53 @@
+<?php
+// index.php (updated header/auth area)
+// Start session and optionally fetch user info for the header dropdown
+session_start();
+require_once __DIR__ . '/backend/config.php';
+
+// Fetch trainers for dropdown
+$trainers = [];
+try {
+    $conn = getDbConnection();
+    $stmt = $conn->prepare("SELECT id, name FROM trainers ORDER BY name ASC");
+    $stmt->execute();
+    $result = $stmt->get_result();
+    while ($row = $result->fetch_assoc()) {
+        $trainers[] = $row;
+    }
+    $stmt->close();
+    $conn->close();
+} catch (Exception $e) {
+    // Ignore errors; dropdown will be empty
+}
+
+$logged_in = false;
+$user_name = '';
+$user_avatar = 'https://ui-avatars.com/api/?name=Guest&background=f97316&color=fff';
+
+if (isset($_SESSION['user_id']) && (int)$_SESSION['user_id'] > 0) {
+    $logged_in = true;
+    $user_name = $_SESSION['user_fullname'] ?? '';
+    $user_id = (int)$_SESSION['user_id'];
+
+    // Try to get picture/email from DB (best-effort)
+    try {
+        $conn = getDbConnection();
+        $stmt = $conn->prepare("SELECT picture, email FROM users WHERE id = ? LIMIT 1");
+        $stmt->bind_param('i', $user_id);
+        $stmt->execute();
+        $row = $stmt->get_result()->fetch_assoc();
+        if ($row) {
+            if (!empty($row['picture'])) $user_avatar = $row['picture'];
+            if (empty($user_name) && !empty($row['email'])) $user_name = explode('@', $row['email'])[0];
+        }
+        $stmt->close();
+        $conn->close();
+    } catch (Throwable $e) {
+        // ignore DB errors; default avatar/name will be used
+    }
+}
+?>
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -14,6 +64,24 @@
         duration: 1000,
         once: true
       });
+
+      // Handle booking/contact feedback from URL parameters
+      document.addEventListener('DOMContentLoaded', function() {
+        const urlParams = new URLSearchParams(window.location.search);
+        if (urlParams.has('booking_success')) {
+            Swal.fire({
+                icon: 'success',
+                title: 'Booking Successful!',
+                text: 'Your session has been booked. We will confirm the details shortly.',
+                background: '#1a1a1a',
+                color: '#fff',
+                confirmButtonColor: '#ff4500'
+            });
+        } else if (urlParams.has('booking_error')) {
+            const error = urlParams.get('booking_error') || 'An unknown error occurred.';
+            Swal.fire('Booking Failed', error.replace(/_/g, ' '), 'error');
+        }
+      });
     </script>
 
     <!-- Tailwind CSS for About Us, Services, and Membership -->
@@ -24,9 +92,12 @@
     <link href="https://fonts.googleapis.com/css2?family=Lexend:wght@400;500;700;900&family=Noto+Sans:wght@400;500;700;900&display=swap" rel="stylesheet"/>
     <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined" rel="stylesheet"/>
 
+    <!-- SweetAlert2 for better alerts -->
+    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+
     <!-- Inline Styles and Scripts -->
     <style>
-        :root {
+  :root {
             --glow-color: #ff3300;
         }
         .parallax {
@@ -275,10 +346,8 @@
 
 .animate-pulse-slow {
   animation: pulse-slow 3s ease-in-out infinite;
-}
-
-
-</style>
+}   
+    </style>
     <script>
         tailwind.config = {
             darkMode: "class",
@@ -325,7 +394,7 @@
             },
         }
     </script>
-
+    
 </head>
 <body class="font-display text-gray-300 antialiased relative" style="background-color: #000; background-image: radial-gradient(at 20% 20%, hsla(0, 0%, 0%, 0.10) 0px, transparent 50%), radial-gradient(at 80% 20%, hsla(0, 0%, 0%, 0.10) 0px, transparent 50%), radial-gradient(at 80% 80%, hsla(0, 0%, 0%, 0.10) 0px, transparent 50%), radial-gradient(at 20% 80%, hsla(0, 0%, 0%, 0.10) 0px, transparent 50%);">
   <!-- ---------- HEADER ---------- -->
@@ -350,13 +419,69 @@
         </ul>
       </nav>
 
-      <!-- Auth Buttons -->
+      <!-- Auth Buttons / User Dropdown (glassmorphism) -->
       <div class="hidden md:flex items-center gap-3">
-        <a href="login.php" class="px-5 py-2 rounded-full border border-white/40 text-white text-sm font-semibold uppercase hover:text-black hover:bg-white transition">Login</a>
+      <?php if ($logged_in): ?>
+        <!-- User dropdown shown when logged in -->
+        <div class="relative inline-flex" id="user-dropdown-root">
+          <button id="user-dropdown-toggle" type="button" aria-haspopup="menu" aria-expanded="false"
+            class="py-1 ps-1 pe-3 inline-flex items-center gap-x-2 text-sm font-medium rounded-full border border-white/10 glassmorphism text-white shadow-2xs hover:opacity-90 focus:outline-hidden disabled:opacity-50 disabled:pointer-events-none">
+            <img class="w-8 h-auto rounded-full" src="<?php echo htmlspecialchars($user_avatar); ?>" alt="Avatar">
+            <span class="text-white font-medium truncate max-w-30"><?php echo htmlspecialchars($user_name ?: 'Member'); ?></span>
+            <svg class="size-4 opacity-90" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+          </button>
+
+          <div id="user-dropdown-menu" class="hidden absolute right-0 mt-2 min-w-60 glassmorphism bg-transparent shadow-lg rounded-lg z-50"
+            role="menu" aria-orientation="vertical" aria-labelledby="user-dropdown-toggle">
+            <div class="p-1 space-y-0.5">
+              <a class="block px-3 py-2 text-sm text-white hover:bg-white/5 rounded-lg" href="customerdash.php">Dashboard</a>
+              <a class="block px-3 py-2 text-sm text-white hover:bg-white/5 rounded-lg" href="customerdash.php?action=logout">Logout</a>
+              <div class="border-t border-white/5 my-1"></div>
+      <?php else: ?>
+        <!-- Not logged in: show original auth buttons but harmonized to glass -->
+        <a href="login.php" class="px-5 py-2 rounded-full border border-white/20 glassmorphism text-white text-sm font-semibold uppercase hover:text-white transition">Login</a>
         <a href="register.php" class="px-5 py-2 rounded-full bg-gradient-to-r from-[#ef3b1b] to-[#ff6b3a] text-white text-sm font-semibold uppercase shadow-lg hover:scale-105 transition">Sign Up</a>
+      <?php endif; ?>
       </div>
     </div>
   </header>
+
+ <!-- Minimal JS to make the dropdown functional -->
+  <script>
+    (function(){
+      const toggle = document.getElementById('user-dropdown-toggle');
+      const menu = document.getElementById('user-dropdown-menu');
+      if (!toggle || !menu) return;
+
+      const closeMenu = () => {
+        menu.classList.add('hidden');
+        toggle.setAttribute('aria-expanded', 'false');
+      };
+      const openMenu = () => {
+        menu.classList.remove('hidden');
+        toggle.setAttribute('aria-expanded', 'true');
+      };
+
+      toggle.addEventListener('click', function(e){
+        e.stopPropagation();
+        menu.classList.toggle('hidden');
+        const expanded = toggle.getAttribute('aria-expanded') === 'true';
+        toggle.setAttribute('aria-expanded', expanded ? 'false' : 'true');
+      });
+
+      // close on outside click
+      document.addEventListener('click', function(e){
+        if (!menu.classList.contains('hidden')) {
+          if (!menu.contains(e.target) && !toggle.contains(e.target)) closeMenu();
+        }
+      });
+
+      // close on escape
+      document.addEventListener('keydown', function(e){
+        if (e.key === 'Escape') closeMenu();
+      });
+    })();
+  </script>
 
   <!-- ---------- HERO ---------- -->
   <section id="home" class="relative min-h-screen flex items-center overflow-hidden bg-[url('img/hero-1.png')] bg-cover bg-center brightness-90 pt-24">
@@ -411,10 +536,6 @@
       </div>
     </div>
   </section>
-
-
-
-<body class="bg-black text-white">
 
 <!-- About Us -->
 <section id="about" class="pt-32 pb-24 relative overflow-hidden">
@@ -540,163 +661,248 @@
   </div>
 </section>
 
-
-<style>
-/* Floating blobs animation */
-@keyframes blob {
-  0%   { transform: translate(0px, 0px) scale(1); }
-  33%  { transform: translate(30px, -50px) scale(1.1); }
-  66%  { transform: translate(-20px, 20px) scale(0.9); }
-  100% { transform: translate(0px, 0px) scale(1); }
-}
-.animate-blob {
-  animation: blob 18s infinite;
-}
-.animation-delay-2000 {
-  animation-delay: 2s;
-}
-</style>
-
-</body>
-</html>
-
-
-  <!-- Services -->
-  <section id="services" class="w-full bg-brand-dark parallax">
-    <div class="w-full bg-black/60">
-      <div class="container mx-auto px-4 sm:px-6 lg:px-8 py-16 sm:py-24">
-        <div class="text-center" data-aos="fade-up">
-          <h1 class="text-4xl sm:text-5xl font-bold text-white relative inline-block pb-2 section-title">Our Services
-            <span class="absolute bottom-0 left-1/2 -translate-x-1/2 w-2/1 h-1 bg-brand-orange"></span>
-          </h1>
-          <p class="mt-4 text-lg text-brand-orange">Transform your body and mind</p>
+<!-- Services -->
+<section id="services" class="w-full bg-brand-dark parallax">
+  <div class="w-full bg-black/60">
+    <div class="container mx-auto px-4 sm:px-6 lg:px-8 py-16 sm:py-24">
+      <div class="text-center" data-aos="fade-up">
+        <h1 class="text-4xl sm:text-5xl font-bold text-white relative inline-block pb-2 section-title">Our Services
+          <span class="absolute bottom-0 left-1/2 -translate-x-1/2 w-2/1 h-1 bg-brand-orange"></span>
+        </h1>
+        <p class="mt-4 text-lg text-brand-orange">Transform your body and mind</p>
+      </div>
+      <div class="mt-20 grid grid-cols-1 gap-12 sm:grid-cols-2 lg:grid-cols-3">
+        <div class="service-card rounded-xl overflow-hidden shadow-lg shadow-[var(--glow-color)]/20 transition-all duration-300 hover:scale-105 hover:shadow-[var(--glow-color)]/60 group" data-aos="fade-up" data-aos-delay="100">
+          <div class="relative">
+            <img alt="Strength Training" class="w-full h-56 object-cover" src="https://lh3.googleusercontent.com/aida-public/AB6AXuDvOA0mVG507fmXsgI0JAjBhiDS740fYaa0nJ3rt525VURofbNjARJmcEEyFXdMXygAlUtj4rqpzS60adFnV7xGQvgxrpCp-SoirNtWKBtWL53xX5u_-IQhG5Vy7NfAzgY9mPrMIY3k7HjtArM15rmWqr8AV2YZtzlD2NnGJ5MgVYoKxZmC06urcjR6VL46M8xU6gLcmDYOFxsyFo_J56onIlXgTkGbVoWUCWOaRhU6AmQtEjV9gNeSEYw4bbKfMOyDsX7u7tODEw95"/>
+            <div class="absolute inset-0 bg-gradient-to-t from-black/50 to-transparent"></div>
+          </div>
+          <div class="p-6 service-card-inner">
+            <h3 class="text-xl font-semibold text-white">Strength Training</h3>
+            <p class="mt-2 text-base text-gray-400">Build muscle and increase your power with our comprehensive strength training programs.</p>
+          </div>
         </div>
-        <div class="mt-20 grid grid-cols-1 gap-12 sm:grid-cols-2 lg:grid-cols-3">
-          <div class="service-card rounded-xl overflow-hidden shadow-lg shadow-[var(--glow-color)]/20 transition-all duration-300 hover:scale-105 hover:shadow-[var(--glow-color)]/60 group" data-aos="fade-up" data-aos-delay="100">
-            <div class="relative">
-              <img alt="Strength Training" class="w-full h-56 object-cover" src="https://lh3.googleusercontent.com/aida-public/AB6AXuDvOA0mVG507fmXsgI0JAjBhiDS740fYaa0nJ3rt525VURofbNjARJmcEEyFXdMXygAlUtj4rqpzS60adFnV7xGQvgxrpCp-SoirNtWKBtWL53xX5u_-IQhG5Vy7NfAzgY9mPrMIY3k7HjtArM15rmWqr8AV2YZtzlD2NnGJ5MgVYoKxZmC06urcjR6VL46M8xU6gLcmDYOFxsyFo_J56onIlXgTkGbVoWUCWOaRhU6AmQtEjV9gNeSEYw4bbKfMOyDsX7u7tODEw95"/>
-              <div class="absolute inset-0 bg-gradient-to-t from-black/50 to-transparent"></div>
-            </div>
-            <div class="p-6 service-card-inner">
-              <h3 class="text-xl font-semibold text-white">Strength Training</h3>
-              <p class="mt-2 text-base text-gray-400">Build muscle and increase your power with our comprehensive strength training programs.</p>
-            </div>
+        <div class="service-card rounded-xl overflow-hidden shadow-lg shadow-[var(--glow-color)]/20 transition-all duration-300 hover:scale-105 hover:shadow-[var(--glow-color)]/60 group" data-aos="fade-up" data-aos-delay="200">
+          <div class="relative">
+            <img alt="Cardio Fitness" class="w-full h-56 object-cover" src="https://lh3.googleusercontent.com/aida-public/AB6AXuCtM5RiPNkRbdY1R-JfTcT9uSC6dMjHh-I_NTHYYhm0aXBDyNHxqrwlpA617y5IWhsImE9iGCdynC_4hfrs05o07okgeUQHbg9L1s-HEYPMmSzjSWI4fVVdCRkk9CZHEQUG_Ju-E9AnRJoev7qvkOkoOn9D-vX65aSAW6L9tW5yW1gUPGuTlBYYa6-ZllaBTQFZHHJn-bu9u1Y1x6DvTBMqQ9SODIYXUqkGUw_HOJSmEw2eUJj0LaTjFWQz0pd4rif3-udnH0ildGrz"/>
+            <div class="absolute inset-0 bg-gradient-to-t from-black/50 to-transparent"></div>
           </div>
-          <div class="service-card rounded-xl overflow-hidden shadow-lg shadow-[var(--glow-color)]/20 transition-all duration-300 hover:scale-105 hover:shadow-[var(--glow-color)]/60 group" data-aos="fade-up" data-aos-delay="200">
-            <div class="relative">
-              <img alt="Cardio Fitness" class="w-full h-56 object-cover" src="https://lh3.googleusercontent.com/aida-public/AB6AXuCtM5RiPNkRbdY1R-JfTcT9uSC6dMjHh-I_NTHYYhm0aXBDyNHxqrwlpA617y5IWhsImE9iGCdynC_4hfrs05o07okgeUQHbg9L1s-HEYPMmSzjSWI4fVVdCRkk9CZHEQUG_Ju-E9AnRJoev7qvkOkoOn9D-vX65aSAW6L9tW5yW1gUPGuTlBYYa6-ZllaBTQFZHHJn-bu9u1Y1x6DvTBMqQ9SODIYXUqkGUw_HOJSmEw2eUJj0LaTjFWQz0pd4rif3-udnH0ildGrz"/>
-              <div class="absolute inset-0 bg-gradient-to-t from-black/50 to-transparent"></div>
-            </div>
-            <div class="p-6 service-card-inner">
-              <h3 class="text-xl font-semibold text-white">Cardio Fitness</h3>
-              <p class="mt-2 text-base text-gray-400">Improve your cardiovascular health and endurance with our varied cardio workouts.</p>
-            </div>
+          <div class="p-6 service-card-inner">
+            <h3 class="text-xl font-semibold text-white">Cardio Fitness</h3>
+            <p class="mt-2 text-base text-gray-400">Improve your cardiovascular health and endurance with our varied cardio workouts.</p>
           </div>
-          <div class="service-card rounded-xl overflow-hidden shadow-lg shadow-[var(--glow-color)]/20 transition-all duration-300 hover:scale-105 hover:shadow-[var(--glow-color)]/60 group" data-aos="fade-up" data-aos-delay="300">
-            <div class="relative">
-              <img alt="Personal Training" class="w-full h-56 object-cover" src="https://lh3.googleusercontent.com/aida-public/AB6AXuDtu1y0PTebVC-UWVCoyDdooNvs6RzBmxnYURz_ly21R3KANa9dnCZVwvpqH-U2nXyAcUEWoUFgh-NHQaOzKn1KJz6lZBnta5Nx41WEH3J-bmqrOVM3Nb5yiUudo_4Lug4W9llnUVVePrrXNpa5dnfm3pgIPalbsRgp1weKL_S43ZfNAHIaMK111WdVPpxZVR5VdJafzJKtzk7mYs4Ji4YL5gKR4xVpawKQ_FidpWJP0Jpo7N12Jeoj7CKn65GAa8JQx8wSVt7p2Ib9"/>
-              <div class="absolute inset-0 bg-gradient-to-t from-black/50 to-transparent"></div>
-            </div>
-            <div class="p-6 service-card-inner">
-              <h3 class="text-xl font-semibold text-white">Personal Training</h3>
-              <p class="mt-2 text-base text-gray-400">Achieve your fitness goals faster with personalized training plans tailored to your needs.</p>
-            </div>
-          </div>
-          </div>
-        <div class="mt-24 text-center" data-aos="fade-up">
-          <h2 class="text-3xl sm:text-4xl font-bold text-white relative inline-block pb-2 section-title">Facilities &amp; Equipment
-            <span class="absolute bottom-0 left-1/2 -translate-x-1/2 w-2/1 h-1 bg-brand-orange"></span>
-          </h2>
-          <p class="mt-6 max-w-2xl mx-auto text-lg text-gray-400">
-            Our state-of-the-art facilities are equipped with the latest fitness technology to help you achieve your goals. We offer a wide range of equipment and amenities, including:
-          </p>
         </div>
-        <div class="mt-12 max-w-lg mx-auto" data-aos="fade-up">
-          <ul class="space-y-4">
-            <li class="flex items-center">
-              <span class="material-symbols-outlined text-brand-orange text-2xl">check_circle</span>
-              <span class="ml-3 text-base text-gray-400">Free Weights Area</span>
-            </li>
-            <li class="flex items-center">
-              <span class="material-symbols-outlined text-brand-orange text-2xl">check_circle</span>
-              <span class="ml-3 text-base text-gray-400">Cardio Machines</span>
-            </li>
-            <li class="flex items-center">
-              <span class="material-symbols-outlined text-brand-orange text-2xl">check_circle</span>
-              <span class="ml-3 text-base text-gray-400">Changing Rooms &amp; Showers</span>
-            </li>
-          </ul>
-        </div>
-        <div class="mt-16 text-center" data-aos="fade-up">
-          <a class="nav-link inline-block bg-brand-orange text-white font-bold text-lg px-8 py-4 rounded-full hover:bg-orange-600 transition-colors duration-300" href="#membership">
-            Join Now
-          </a>
+        <div class="service-card rounded-xl overflow-hidden shadow-lg shadow-[var(--glow-color)]/20 transition-all duration-300 hover:scale-105 hover:shadow-[var(--glow-color)]/60 group" data-aos="fade-up" data-aos-delay="300">
+          <div class="relative">
+            <img alt="Personal Training" class="w-full h-56 object-cover" src="https://lh3.googleusercontent.com/aida-public/AB6AXuDtu1y0PTebVC-UWVCoyDdooNvs6RzBmxnYURz_ly21R3KANa9dnCZVwvpqH-U2nXyAcUEWoUFgh-NHQaOzKn1KJz6lZBnta5Nx41WEH3J-bmqrOVM3Nb5yiUudo_4Lug4W9llnUVVePrrXNpa5dnfm3pgIPalbsRgp1weKL_S43ZfNAHIaMK111WdVPpxZVR5VdJafzJKtzk7mYs4Ji4YL5gKR4xVpawKQ_FidpWJP0Jpo7N12Jeoj7CKn65GAa8JQx8wSVt7p2Ib9"/>
+            <div class="absolute inset-0 bg-gradient-to-t from-black/50 to-transparent"></div>
+          </div>
+          <div class="p-6 service-card-inner">
+            <h3 class="text-xl font-semibold text-white">Personal Training</h3>
+            <p class="mt-2 text-base text-gray-400">Achieve your fitness goals faster with personalized training plans tailored to your needs.</p>
+          </div>
         </div>
       </div>
-    </div>
-  </section>
-
-<!-- Trainers -->
-<section id="coaching" 
-  class="py-24 md:py-32 relative overflow-hidden bg-black">
-
-  <!-- Grain overlay -->
-  <div class="grain-overlay"></div>
-
-  <div class="container mx-auto px-6 relative z-10">
-    <!-- Section Heading -->
-    <div class="text-center mb-20" data-aos="fade-up">
-      <h2 class="text-5xl md:text-6xl font-extrabold leading-tight bg-clip-text text-transparent bg-gradient-to-r from-red-500 via-orange-400 to-orange-500 animate-text-gradient">
-        Meet Our Trainers
-      </h2>
-      <p class="mt-4 text-lg text-gray-300 max-w-2xl mx-auto">Expert coaches committed to your transformation journey.</p>
-    </div>
-
-    <!-- Trainer Cards -->
-    <div class="grid grid-cols-1 lg:grid-cols-2 gap-12">
-      <!-- Trainer 1 -->
-      <div class="group relative rounded-3xl overflow-hidden shadow-lg shadow-orange-600/10 hover:shadow-orange-600/40 transform hover:-translate-y-4 hover:rotate-1 hover:scale-[1.02] transition-all duration-700 ease-[cubic-bezier(.4,0,.2,1)] glass-dark" data-aos="fade-right">
-        <img src="img/trainer-1.jpg" alt="Trainer Allynah Mendoza" loading="lazy"
-             class="absolute inset-0 w-full h-full object-cover opacity-70 transition-transform duration-1000 ease-out group-hover:scale-110">
-        <div class="absolute inset-0 bg-gradient-to-t from-black/85 via-black/60 to-transparent group-hover:from-orange-600/30 group-hover:via-black/70 group-hover:to-transparent transition-all duration-700"></div>
-        <div class="relative p-10 flex flex-col justify-end h-[520px] z-20">
-          <h3 class="text-3xl font-bold text-white mb-2 opacity-0 translate-y-4 group-hover:opacity-100 group-hover:translate-y-0 transition-all duration-700">
-            Allynah Mendoza
-          </h3>
-          <p class="text-orange-400 font-semibold uppercase tracking-wide text-sm mb-4 opacity-0 translate-y-4 group-hover:opacity-100 group-hover:translate-y-0 transition-all duration-700 delay-100">
-            Strength Training
-          </p>
-          <p class="text-zinc-300 font-light opacity-0 translate-y-6 group-hover:opacity-100 group-hover:translate-y-0 transition-all duration-700 delay-200">
-          A certified trainer with 2 years' experience, specializes in strength training, promoting balance and mindfulness.
-          </p>
-          <a href="#booking" class="mt-8 w-fit bg-gradient-to-r from-orange-600 to-red-500 text-white font-bold py-3 px-8 rounded-full shadow-lg shadow-orange-600/30 hover:scale-105 transition-all duration-500 opacity-0 translate-y-6 group-hover:opacity-100 group-hover:translate-y-0 delay-300">
-            Book a Session
-          </a>
-        </div>
+      <div class="mt-24 text-center" data-aos="fade-up">
+        <h2 class="text-3xl sm:text-4xl font-bold text-white relative inline-block pb-2 section-title">Facilities &amp; Equipment
+          <span class="absolute bottom-0 left-1/2 -translate-x-1/2 w-2/1 h-1 bg-brand-orange"></span>
+        </h2>
+        <p class="mt-6 max-w-2xl mx-auto text-lg text-gray-400">
+          Our state-of-the-art facilities are equipped with the latest fitness technology to help you achieve your goals. We offer a wide range of equipment and amenities, including:
+        </p>
       </div>
-
-      <!-- Trainer 2 -->
-      <div class="group relative rounded-3xl overflow-hidden shadow-lg shadow-red-600/10 hover:shadow-red-600/40 transform hover:-translate-y-4 hover:-rotate-1 hover:scale-[1.02] transition-all duration-700 ease-[cubic-bezier(.4,0,.2,1)] glass-dark" data-aos="fade-left">
-        <img src="img/trainer-2.jpg" alt="Trainer Shin Jiro Tenebro" loading="lazy"
-             class="absolute inset-0 w-full h-full object-cover opacity-70 transition-transform duration-1000 ease-out group-hover:scale-110">
-        <div class="absolute inset-0 bg-gradient-to-t from-black/85 via-black/60 to-transparent group-hover:from-red-600/30 group-hover:via-black/70 group-hover:to-transparent transition-all duration-700"></div>
-        <div class="relative p-10 flex flex-col justify-end h-[520px] z-20">
-          <h3 class="text-3xl font-bold text-white mb-2 opacity-0 translate-y-4 group-hover:opacity-100 group-hover:translate-y-0 transition-all duration-700">
-            Shin Jiro Tenebro
-          </h3>
-          <p class="text-red-400 font-semibold uppercase tracking-wide text-sm mb-4 opacity-0 translate-y-4 group-hover:opacity-100 group-hover:translate-y-0 transition-all duration-700 delay-100">
-           Rugby Athletic Training
-          </p>
-          <p class="text-zinc-300 font-light opacity-0 translate-y-6 group-hover:opacity-100 group-hover:translate-y-0 transition-all duration-700 delay-200">
-            With 4 years of experience, an active rugby athlete, a certified Lv1 rugby coach, and have guided athletes in various Lv1 training.
-          </p>
-          <a href="#booking" class="mt-8 w-fit bg-gradient-to-r from-red-600 to-orange-500 text-white font-bold py-3 px-8 rounded-full shadow-lg shadow-red-600/30 hover:scale-105 transition-all duration-500 opacity-0 translate-y-6 group-hover:opacity-100 group-hover:translate-y-0 delay-300">
-            Book a Session
-          </a>
-        </div>
+      <div class="mt-12 max-w-lg mx-auto" data-aos="fade-up">
+        <ul class="space-y-4">
+          <li class="flex items-center">
+            <span class="material-symbols-outlined text-brand-orange text-2xl">check_circle</span>
+            <span class="ml-3 text-base text-gray-400">Free Weights Area</span>
+          </li>
+          <li class="flex items-center">
+            <span class="material-symbols-outlined text-brand-orange text-2xl">check_circle</span>
+            <span class="ml-3 text-base text-gray-400">Cardio Machines</span>
+          </li>
+          <li class="flex items-center">
+            <span class="material-symbols-outlined text-brand-orange text-2xl">check_circle</span>
+            <span class="ml-3 text-base text-gray-400">Changing Rooms &amp; Showers</span>
+          </li>
+        </ul>
+      </div>
+      <div class="mt-16 text-center" data-aos="fade-up">
+        <a class="nav-link inline-block bg-brand-orange text-white font-bold text-lg px-8 py-4 rounded-full hover:bg-orange-600 transition-colors duration-300" href="#membership">
+          Join Now
+        </a>
       </div>
     </div>
   </div>
+</section>
+
+<!-- Trainers Section -->
+<section id="coaching" class="relative overflow-hidden py-24 md:py-32 bg-black">
+  <!-- Grain overlay -->
+  <div class="grain-overlay pointer-events-none fixed inset-0 z-0 opacity-10"></div>
+
+  <!-- Background light beams -->
+  <div class="absolute top-0 left-1/3 w-[500px] h-[800px] bg-gradient-to-b from-orange-500/20 via-transparent to-transparent blur-[160px] rotate-12 animate-beam1 -z-10"></div>
+  <div class="absolute top-0 right-1/3 w-[500px] h-[800px] bg-gradient-to-b from-red-600/20 via-transparent to-transparent blur-[160px] -rotate-12 animate-beam2 -z-10"></div>
+
+  <div class="container relative z-10 mx-auto px-6">
+    <!-- Section Heading -->
+    <div class="mb-20 text-center" data-aos="fade-up">
+      <h2
+        class="bg-gradient-to-r from-red-600 via-orange-500 to-red-600 bg-clip-text text-4xl font-extrabold leading-tight text-transparent md:text-5xl animate-text-gradient"
+      >
+        Meet Our Trainers
+      </h2>
+      <p class="mx-auto mt-4 max-w-xl text-base text-gray-400">
+        Expert coaches committed to your transformation journey.
+      </p>
+    </div>
+
+    <!-- Trainer Cards -->
+    <div class="relative flex flex-wrap justify-center gap-12">
+
+      <!-- Trainer Card 1 -->
+      <article
+        class="group relative w-[320px] md:w-[340px] h-[500px] rounded-3xl overflow-hidden bg-black/80 backdrop-blur-xl border border-white/10 shadow-[0_0_40px_rgba(0,0,0,0.8)]"
+        data-aos="fade-right"
+      >
+        <!-- Background image -->
+        <img
+          src="img/trainer-1.jpg"
+          alt="Trainer Allynah Mendoza"
+          class="absolute inset-0 h-full w-full object-cover opacity-70"
+        />
+
+        <!-- Spotlight mask -->
+        <div class="spotlight absolute inset-0 z-10"></div>
+
+        <!-- Info -->
+        <div
+          class="absolute inset-0 z-20 flex flex-col justify-end p-7 text-white opacity-0 group-hover:opacity-100 transition-opacity duration-700"
+        >
+          <h3 class="mb-1 text-2xl font-bold">Allynah Mendoza</h3>
+          <p class="mb-3 text-xs font-semibold uppercase tracking-widest text-orange-400">
+            Strength Training
+          </p>
+          <p class="text-sm text-gray-300 leading-relaxed">
+            Certified trainer with 2 years' experience in strength training,
+            focusing on balance, endurance, and mindfulness.
+          </p>
+          <div class="mt-6">
+            <a
+              href="#booking"
+              class="inline-block rounded-full bg-gradient-to-r from-orange-600 to-red-500 px-5 py-2 text-sm font-semibold text-white shadow-md shadow-orange-600/30 transition-transform duration-300 hover:scale-105"
+            >
+              Book a Session
+            </a>
+          </div>
+        </div>
+      </article>
+
+      <!-- Trainer Card 2 -->
+      <article
+        class="group relative w-[320px] md:w-[340px] h-[500px] rounded-3xl overflow-hidden bg-black/80 backdrop-blur-xl border border-white/10 shadow-[0_0_40px_rgba(0,0,0,0.8)]"
+        data-aos="fade-left"
+      >
+        <!-- Background image -->
+        <img
+          src="img/trainer-2.jpg"
+          alt="Trainer Shin Jiro Tenebro"
+          class="absolute inset-0 h-full w-full object-cover opacity-70"
+        />
+
+        <!-- Spotlight mask -->
+        <div class="spotlight absolute inset-0 z-10"></div>
+
+        <!-- Info -->
+        <div
+          class="absolute inset-0 z-20 flex flex-col justify-end p-7 text-white opacity-0 group-hover:opacity-100 transition-opacity duration-700"
+        >
+          <h3 class="mb-1 text-2xl font-bold">Shin Jiro Tenebro</h3>
+          <p class="mb-3 text-xs font-semibold uppercase tracking-widest text-red-400">
+            Rugby Athletic Training
+          </p>
+          <p class="text-sm text-gray-300 leading-relaxed">
+            4 years’ experience as an active rugby athlete and certified Lv1
+            coach, specializing in athletic conditioning and performance.
+          </p>
+          <div class="mt-6">
+            <a
+              href="#booking"
+              class="inline-block rounded-full bg-gradient-to-r from-red-600 to-orange-500 px-5 py-2 text-sm font-semibold text-white shadow-md shadow-red-600/30 transition-transform duration-300 hover:scale-105"
+            >
+              Book a Session
+            </a>
+          </div>
+        </div>
+      </article>
+    </div>
+  </div>
+
+  <style>
+    /* Grain Overlay */
+    .grain-overlay {
+      background-image: url("data:image/svg+xml,%3Csvg width='100%' height='100%' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='grain' x='0' y='0' width='100%' height='100%'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='4' stitchTiles='stitch' result='noise' /%3E%3CfeColorMatrix in='noise' type='saturate' values='0' result='desaturatedNoise' /%3E%3CfeComponentTransfer in='desaturatedNoise' result='grain' %3E%3CfeFuncR type='linear' slope='0.1' /%3E%3CfeFuncG type='linear' slope='0.1' /%3E%3CfeFuncB type='linear' slope='0.1' /%3E%3C/feComponentTransfer%3E%3C/filter%3E%3Crect width='100%' height='100%' filter='url(%23grain)' /%3E%3C/svg%3E");
+      position: fixed;
+      inset: 0;
+      z-index: 0;
+      opacity: 0.1;
+      mix-blend-mode: overlay;
+      animation: grain-move 8s linear infinite;
+    }
+    @keyframes grain-move {
+      0% { background-position: 0 0; }
+      100% { background-position: 100% 100%; }
+    }
+
+    /* Animate text gradient */
+    @keyframes text-gradient {
+      0%, 100% { background-position: 0% 50%; }
+      50% { background-position: 100% 50%; }
+    }
+    .animate-text-gradient {
+      background-size: 200% 200%;
+      animation: text-gradient 4s ease infinite;
+    }
+
+    /* Spotlight effect on card */
+    .spotlight {
+      background: radial-gradient(circle at 50% 40%, rgba(255,165,0,0.45) 0%, transparent 70%);
+      mix-blend-mode: screen;
+      opacity: 0;
+      transform: scale(1.3);
+      transition: opacity 0.6s ease;
+    }
+    .group:hover .spotlight {
+      opacity: 1;
+      animation: spotlight-move 5s ease-in-out infinite;
+    }
+
+    /* Spotlight wobble animation */
+    @keyframes spotlight-move {
+      0%, 100% { background-position: 50% 40%; }
+      25% { background-position: 45% 45%; }
+      50% { background-position: 55% 42%; }
+      75% { background-position: 48% 38%; }
+    }
+
+    /* Light beam animations in background */
+    @keyframes beam1 {
+      0%, 100% { transform: rotate(12deg) translateX(-40px); opacity: 0.4; }
+      50% { transform: rotate(8deg) translateX(40px); opacity: 0.7; }
+    }
+    .animate-beam1 {
+      animation: beam1 6s ease-in-out infinite;
+    }
+
+    @keyframes beam2 {
+      0%, 100% { transform: rotate(-12deg) translateX(40px); opacity: 0.4; }
+      50% { transform: rotate(-8deg) translateX(-40px); opacity: 0.7; }
+    }
+    .animate-beam2 {
+      animation: beam2 6s ease-in-out infinite;
+    }
+  </style>
 </section>
 
  <!-- Membership & Pricing -->
@@ -727,7 +933,7 @@
       </ul>
     </div>
 
-    <!-- Membership (Most Popular) -->
+    <!-- Membership (Most Popular) with customer dashboard link -->
     <div class="bg-gradient-to-br from-orange-700 to-orange-70 backdrop-blur-2xl p-10 rounded-2xl flex flex-col relative transform md:scale-105 shadow-2xl shadow-orange-700/30 transition-all duration-300 hover:md:scale-110 border border-orange-500/50 group">
       <div class="absolute top-0 right-0 bg-white text-orange-700 text-xs font-bold px-4 py-1.5 rounded-bl-lg rounded-tr-lg">MOST POPULAR</div>
       <h2 class="text-2xl font-semibold text-white mb-2 pt-6">Membership</h2>
@@ -736,9 +942,15 @@
         <span class="text-5xl font-bold text-white">₱850</span>
         <span class="text-sm text-orange-100 ml-2">/ year</span>
       </div>
-      <a class="bg-white text-orange-700 font-semibold py-3 px-6 rounded-lg hover:bg-orange-50 transition-all duration-300 mb-6" href="register.php"><button>
-        Join Now
-  </button></a>
+      <?php if ($logged_in): ?>
+        <a href="customerdash.php" class="bg-white text-orange-700 font-semibold py-3 px-6 rounded-lg hover:bg-orange-50 transition-all duration-300 mb-6 text-center block">
+          Go to My Dashboard
+        </a>
+      <?php else: ?>
+        <a href="register.php" class="bg-white text-orange-700 font-semibold py-3 px-6 rounded-lg hover:bg-orange-50 transition-all duration-300 mb-6 text-center block">
+          Join Now
+        </a>
+      <?php endif; ?>
       <ul class="space-y-4 text-orange-50 flex-grow">
         <li class="flex items-center"><span class="material-symbols-outlined mr-3">check_circle</span>Free treadmill use</li>
         <li class="flex items-center"><span class="material-symbols-outlined mr-3">check_circle</span>Access to member-only promos</li>
@@ -756,7 +968,7 @@
       </div>
       <a href="register.php"><button class="bg-white/5 border border-white/10 text-white font-semibold py-3 px-6 rounded-lg hover:bg-white/10 transition-all duration-300 mb-6 group-hover:bg-orange-600 group-hover:border-orange-500 group-hover:text-white">
         Get Started
-      </a></button>
+      </button></a>
       <ul class="space-y-4 text-gray-300 flex-grow">
         <li class="flex items-center"><span class="material-symbols-outlined text-orange-400 mr-3">check_circle</span>1 Week: ₱250</li>
         <li class="flex items-center"><span class="material-symbols-outlined text-orange-400 mr-3">check_circle</span>2 Weeks: ₱500 (+1 free visit)</li>
@@ -939,7 +1151,6 @@
 </script>
 
 
-
 <!-- Booking and Contact -->
 <section id="booking" class="relative bg-brand-dark font-display text-gray-300 antialiased">
   <div id="booking-spotlight1" class="pointer-events-none absolute w-[500px] h-[500px] rounded-full bg-orange-600/20 blur-[160px] opacity-0 transform -translate-x-1/2 -translate-y-1/2"></div>
@@ -953,18 +1164,31 @@
             <h2 class="text-4xl font-bold text-white"><span class="section-title">Booking</span></h2>
             <p class="text-lg text-gray-400">Schedule your personalized fitness session with our expert coaches. Fill out the form below to get started on your fitness journey.</p>
           </div>
-          <form class="space-y-6 text-lg" id="booking-form-element" action="backend/booking.php" method="POST">
+          <form class="space-y-6 text-lg" id="booking-form-element" action="backend/booking.php" method="POST" novalidate>
             <div class="grid grid-cols-1 sm:grid-cols-2 gap-6">
-              <input class="form-input w-full rounded-lg border-gray-700 bg-black/50 p-4 placeholder-gray-500 text-white focus:ring-2 focus:ring-primary focus:border-transparent" id="name" name="name" placeholder="Full Name" required="" type="text" value=""/>
-              <input class="form-input w-full rounded-lg border-gray-700 bg-black/50 p-4 placeholder-gray-500 text-white focus:ring-2 focus:ring-primary focus:border-transparent" id="email" name="email" placeholder="Email Address" required="" type="email" value=""/>
+              <input class="form-input w-full rounded-lg border-gray-700 bg-black/50 p-4 placeholder-gray-500 text-white focus:ring-2 focus:ring-primary focus:border-transparent" id="name" name="name" placeholder="Full Name" required type="text" value="<?php echo isset($_SESSION['user_fullname']) ? htmlspecialchars($_SESSION['user_fullname']) : ''; ?>" />
+              <input class="form-input w-full rounded-lg border-gray-700 bg-black/50 p-4 placeholder-gray-500 text-white focus:ring-2 focus:ring-primary focus:border-transparent" id="email" name="email" placeholder="Email Address" required type="email" value="<?php echo isset($_SESSION['user_email']) ? htmlspecialchars($_SESSION['user_email']) : ''; ?>" />
             </div>
+
             <input class="form-input w-full rounded-lg border-gray-700 bg-black/50 p-4 placeholder-gray-500 text-white focus:ring-2 focus:ring-primary focus:border-transparent" placeholder="Phone number" name="phone" type="tel"/>
-            <select class="form-select w-full rounded-lg border-black-700 bg-black/50 p-4 text-gray-400 focus:ring-2 focus:ring-primary focus:border-transparent" id="service" name="service" required="">
-              <option disabled="" value="">Select Service</option>
-              <option selected="" value="Personal Training">Personal Training</option>
-              <option value="Group Class">Group Class</option>
-              <option value="Nutrition Coaching">Nutrition Coaching</option>
+            <select
+              class="form-select w-full rounded-lg border-gray-700 bg-black/50 p-4 text-gray-400 focus:ring-2 focus:ring-primary focus:border-transparent"
+              id="service" name="trainer_id" required>
+              <option value="">Select Trainer</option>
+              <?php foreach ($trainers as $trainer): ?>
+                <option value="<?= (int)$trainer['id'] ?>"><?= htmlspecialchars($trainer['name']) ?></option>
+              <?php endforeach; ?>
             </select>
+
+            <input type="hidden" name="service" id="service-name" value="">
+            <script>
+              const trainerSelect = document.getElementById('service');
+              const serviceNameInput = document.getElementById('service-name');
+              trainerSelect.addEventListener('change', function() {
+                const selectedOption = trainerSelect.options[trainerSelect.selectedIndex];
+                serviceNameInput.value = selectedOption.text;
+              });
+            </script>
             <div class="bg-black/50 rounded-lg border border-gray-700 p-4">
               <div class="flex items-center justify-between mb-4">
                 <button class="p-2 rounded-full hover:bg-gray-700 transition-colors btn-hover" type="button" id="prev-month">
@@ -979,17 +1203,18 @@
                 <div>Sun</div><div>Mon</div><div>Tue</div><div>Wed</div><div>Thu</div><div>Fri</div><div>Sat</div>
               </div>
               <div class="grid grid-cols-7 gap-2 text-center" id="calendar-days"></div>
-              <input type="hidden" name="date" id="selected-date-input">
+              <input type="hidden" name="date" id="selected-date-input" required>
             </div>
-            <select class="form-select w-full rounded-lg border-gray-700 bg-black/50 p-4 text-gray-400 focus:ring-2 focus:ring-primary focus:border-transparent glass-dark" id="time" name="time" required="">
-              <option disabled="" value="">Select Time</option>
+            <select class="form-select w-full rounded-lg border-gray-700 bg-black/50 p-4 text-gray-400 focus:ring-2 focus:ring-primary focus:border-transparent glass-dark" id="time" name="time" required>
+              <option disabled value="">Select Time</option>
             </select>
-            <div class="relative">
-              <span class="material-symbols-outlined absolute left-4 top-1/2 -translate-y-1/2 text-gray-400">  </span>
-              <input class="form-input w-full rounded-lg border-gray-700 bg-black/50 p-4 pl-12 placeholder-gray-500 text-white focus:ring-2 focus:ring-primary focus:border-transparent" placeholder="Input coach name" name="coach" type="text"/>
-            </div>
             <textarea class="form-textarea w-full rounded-lg border-gray-700 bg-black/50 p-4 placeholder-gray-500 text-white focus:ring-2 focus:ring-primary focus:border-transparent" placeholder="Additional Notes (e.g., fitness goals, preferred time)" name="notes" rows="4"></textarea>
-            <button class="w-full rounded-lg bg-primary px-6 py-4 text-lg text-white font-bold tracking-wide transition-all duration-300 hover:bg-opacity-90 hover:scale-105 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-background-dark focus:ring-primary btn-hover" type="submit">Book Now</button>
+            <button
+              class="w-full rounded-lg bg-primary px-6 py-4 text-lg text-white font-bold tracking-wide transition-all duration-300 hover:bg-opacity-90 hover:scale-105 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-background-dark focus:ring-primary btn-hover"
+              type="submit"
+            >
+              Book Now
+            </button>
           </form>
         </div>
         <div class="hidden space-y-8 glass-effect p-8 rounded-xl" data-aos="fade-up" id="confirmation-container">
@@ -1003,9 +1228,9 @@
             <p class="text-lg text-gray-400">Thank you, <span class="font-semibold text-white" id="conf-name"></span>! Your session has been successfully booked. A confirmation email has been sent to <span class="font-semibold text-white" id="conf-email"></span>.</p>
           </div>
           <div class="border-t border-gray-700 my-6"></div>
-          <div class="space-y-6">
+          <div class="space-y-6 text-lg">
             <h3 class="text-2xl font-bold text-white"><i class="fa-solid fa-calendar-check mr-2"></i>Booking Summary</h3>
-            <div class="space-y-4 text-lg">
+            <div class="space-y-4">
               <div class="flex justify-between">
                 <span class="text-gray-400">Service:</span>
                 <span class="font-medium text-white" id="conf-service"></span>
@@ -1024,6 +1249,7 @@
             <button class="w-full rounded-lg bg-primary px-1 py-1 text-lg text-white font-bold tracking-wide transition-all duration-300 hover:bg-opacity-90 hover:scale-105 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-background-dark focus:ring-primary btn-hover" id="new-booking-btn">Make Another Booking</button>
           </div>
         </div>
+
         <div id="contact" class="space-y-8 glass-effect p-8 rounded-xl relative" data-aos="fade-up" data-aos-delay="100">
           <div id="contact-spotlight1" class="pointer-events-none absolute w-[500px] h-[500px] rounded-full bg-orange-600/20 blur-[160px] opacity-0 transform -translate-x-1/2 -translate-y-1/2"></div>
           <div id="contact-spotlight2" class="pointer-events-none absolute w-[250px] h-[250px] rounded-full bg-orange-400/30 blur-[100px] opacity-0 transform -translate-x-1/2 -translate-y-1/2"></div>
@@ -1031,16 +1257,27 @@
             <h2 class="text-4xl font-bold text-white">Contact Us</h2>
             <p class="text-lg text-gray-400">Have questions or need assistance? Reach out to us using the form below, and we'll get back to you as soon as possible.</p>
           </div>
-          <form class="space-y-6 text-lg">
+          <form class="space-y-6 text-lg" action="backend/contact.php" method="POST">
+            <?php if (isset($_GET['contact_success'])): ?>
+              <div class="p-4 mb-4 text-sm text-green-700 bg-green-100 rounded-lg dark:bg-green-200 dark:text-green-800" role="alert">
+                <span class="font-medium">Success!</span> Your message has been sent.
+              </div>
+            <?php endif; ?>
+            <?php if (isset($_GET['contact_error'])): ?>
+              <div class="p-4 mb-4 text-sm text-red-700 bg-red-100 rounded-lg dark:bg-red-200 dark:text-red-800" role="alert">
+                <span class="font-medium">Error!</span> <?php echo htmlspecialchars($_GET['contact_error']); ?>
+              </div>
+            <?php endif; ?>
             <div class="grid grid-cols-1 sm:grid-cols-2 gap-6">
-              <input class="form-input w-full rounded-lg border-gray-700 bg-black/50 p-4 placeholder-gray-500 text-white focus:ring-2 focus:ring-primary focus:border-transparent" placeholder="Your Name" required="" type="text"/>
-              <input class="form-input w-full rounded-lg border-gray-700 bg-black/50 p-4 placeholder-gray-500 text-white focus:ring-2 focus:ring-primary focus:border-transparent" placeholder="Your Email" required="" type="email"/>
+              <input class="form-input w-full rounded-lg border-gray-700 bg-black/50 p-4 placeholder-gray-500 text-white focus:ring-2 focus:ring-primary focus:border-transparent" placeholder="Your Name" required type="text" name="name"/>
+              <input class="form-input w-full rounded-lg border-gray-700 bg-black/50 p-4 placeholder-gray-500 text-white focus:ring-2 focus:ring-primary focus:border-transparent" placeholder="Your Email" required type="email" name="email"/>
             </div>
-            <textarea class="form-textarea w-full rounded-lg border-gray-700 bg-black/50 p-4 placeholder-gray-500 text-white focus:ring-2 focus:ring-primary focus:border-transparent" placeholder="Your Message" required="" rows="5"></textarea>
+            <textarea class="form-textarea w-full rounded-lg border-gray-700 bg-black/50 p-4 placeholder-gray-500 text-white focus:ring-2 focus:ring-primary focus:border-transparent" placeholder="Your Message" required rows="5" name="message"></textarea>
             <button class="w-full rounded-lg bg-primary px-6 py-4 text-lg text-white font-bold tracking-wide transition-all duration-300 hover:bg-opacity-90 hover:scale-105 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-background-dark focus:ring-primary btn-hover" type="submit">Send Message</button>
           </form>
         </div>
       </div>
+
       <div class="lg:col-span-2 lg:sticky lg:top-20 lg:self-start space-y-8" data-aos="fade-up" data-aos-delay="200">
         <div class="glass-effect p-8 rounded-xl space-y-6">
           <div class="space-y-4">
@@ -1306,19 +1543,8 @@
       const newBookingBtn = document.getElementById('new-booking-btn');
       if(bookingForm) {
         bookingForm.addEventListener('submit', function(e) {
-            e.preventDefault();
-            const name = document.getElementById('name').value;
-            const email = document.getElementById('email').value;
-            const service = document.getElementById('service').value;
-            const date = `October ${document.getElementById('selected-date').textContent}, 2024`;
-            document.getElementById('conf-name').textContent = name;
-            document.getElementById('conf-email').textContent = email;
-            document.getElementById('conf-service').textContent = service;
-            document.getElementById('conf-date').textContent = date;
-            bookingFormContainer.classList.add('hidden');
-            confirmationContainer.classList.remove('hidden');
-            AOS.refresh();
-            window.scrollTo({ top: confirmationContainer.offsetTop - 100, behavior: 'smooth' });
+            // Allow form submission to backend normally
+            // Remove custom confirmation display to let backend handle feedback
         });
       }
       if(newBookingBtn) {
@@ -1326,9 +1552,10 @@
             confirmationContainer.classList.add('hidden');
             bookingFormContainer.classList.remove('hidden');
             if(bookingForm) bookingForm.reset();
-            document.getElementById('name').value = 'John Doe';
-            document.getElementById('email').value = 'john.doe@example.com';
-            document.getElementById('service').value = 'Personal Training';
+            document.getElementById('name').value = '<?php echo isset($_SESSION['user_fullname']) ? htmlspecialchars($_SESSION['user_fullname']) : ''; ?>';
+            document.getElementById('email').value = '<?php echo isset($_SESSION['user_email']) ? htmlspecialchars($_SESSION['user_email']) : ''; ?>';
+            document.getElementById('service').value = '';
+            document.getElementById('service-name').value = '';
             AOS.refresh();
             window.scrollTo({ top: bookingFormContainer.offsetTop - 100, behavior: 'smooth' });
         });
@@ -1355,10 +1582,11 @@
       const prevMonthBtn = document.getElementById('prev-month');
       const nextMonthBtn = document.getElementById('next-month');
       const timeSelect = document.getElementById('time');
+      const selectedDateInput = document.getElementById('selected-date-input');
 
       let currentDate = new Date();
 
-      const renderCalendar = () => {
+      function renderCalendar() {
         const month = currentDate.getMonth();
         const year = currentDate.getFullYear();
 
@@ -1374,35 +1602,43 @@
           calendarDays.appendChild(emptyDiv);
         }
 
-        for (let i = 1; i <= daysInMonth; i++) {
+        for (let day = 1; day <= daysInMonth; day++) {
           const dayElement = document.createElement('div');
-          dayElement.textContent = i;
-          dayElement.classList.add('cursor-pointer', 'w-10', 'h-10', 'flex', 'items-center', 'justify-center', 'rounded-full', 'transition-all', 'duration-300', 'ease-in-out', 'transform', 'hover:scale-110', 'hover:bg-brand-orange', 'hover:text-white');
-          if (i === new Date().getDate() && month === new Date().getMonth() && year === new Date().getFullYear()) {
+          dayElement.textContent = day;
+          dayElement.classList.add('cursor-pointer', 'w-10', 'h-10', 'flex', 'items-center', 'justify-center', 'rounded-full', 'transition-all', 'duration-300', 'ease-in-out', 'transform', 'hover:scale-110', 'hover:bg-primary', 'hover:text-white');
+          if (day === new Date().getDate() && month === new Date().getMonth() && year === new Date().getFullYear()) {
             dayElement.classList.add('bg-primary', 'text-white');
+            selectedDateInput.value = formatDate(year, month + 1, day);
           }
           dayElement.addEventListener('click', () => {
-            const selected = document.querySelector('.day-selected');
-            if (selected) {
-              selected.classList.remove('day-selected', 'bg-primary', 'text-white');
-            }
+            // Remove previously selected
+            calendarDays.querySelectorAll('.day-selected').forEach(el => {
+              el.classList.remove('day-selected', 'bg-primary', 'text-white');
+            });
             dayElement.classList.add('day-selected', 'bg-primary', 'text-white');
-            document.getElementById('conf-date').textContent = `${currentDate.toLocaleString('default', { month: 'long' })} ${i}, ${year}`;
+            selectedDateInput.value = formatDate(year, month + 1, day);
           });
           calendarDays.appendChild(dayElement);
         }
-      };
+      }
 
-      const populateTime = () => {
-        timeSelect.innerHTML = '<option disabled="" value="">Select Time</option>';
-        for (let i = 8; i <= 22; i++) { // Changed to 22 for 10 PM
-          const hour = i < 10 ? `0${i}` : i;
+      function formatDate(year, month, day) {
+        // Format YYYY-MM-DD
+        const mm = month < 10 ? '0' + month : month;
+        const dd = day < 10 ? '0' + day : day;
+        return `${year}-${mm}-${dd}`;
+      }
+
+      function populateTimeOptions() {
+        timeSelect.innerHTML = '<option disabled selected value="">Select Time</option>';
+        for (let hour = 8; hour <= 22; hour++) { // 8 AM to 10 PM
+          const displayHour = hour < 10 ? `0${hour}` : hour;
           const option = document.createElement('option');
-          option.value = `${hour}:00`;
-          option.textContent = `${hour}:00`;
+          option.value = `${displayHour}:00:00`; // backend expects HH:MM:SS format
+          option.textContent = `${displayHour}:00`;
           timeSelect.appendChild(option);
         }
-      };
+      }
 
       prevMonthBtn.addEventListener('click', () => {
         currentDate.setMonth(currentDate.getMonth() - 1);
@@ -1414,12 +1650,20 @@
         renderCalendar();
       });
 
-      timeSelect.addEventListener('change', () => {
-        document.getElementById('conf-time').textContent = timeSelect.value;
-      });
-
       renderCalendar();
-      populateTime();
+      populateTimeOptions();
+
+      // Form submission validation
+      bookingForm.addEventListener('submit', function(e) {
+        if (!selectedDateInput.value) {
+          alert('Please select a date for your booking.');
+          e.preventDefault();
+        }
+        if (!timeSelect.value) {
+          alert('Please select a time for your booking.');
+          e.preventDefault();
+        }
+      });
     });
   </script>
 </body>
